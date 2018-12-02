@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// PuppetDB is a struct which stores the PuppetDB configuration parameters
 type PuppetDB struct {
 	URL             string        `yaml:"url"`
 	CertFile        string        `yaml:"certfile,omitempty"`
@@ -46,6 +47,7 @@ type staticConfig struct {
 	Labels  map[string]string `yaml:"labels"`
 }
 
+// New creates a new PuppetDB client
 func (cfg *PuppetDB) New() (err error) {
 	puppetDBUrl, err := url.Parse(cfg.URL)
 	if err != nil {
@@ -53,7 +55,7 @@ func (cfg *PuppetDB) New() (err error) {
 	}
 
 	if puppetDBUrl.Scheme != "http" && puppetDBUrl.Scheme != "https" {
-		return fmt.Errorf("%s is not a valid http scheme\n", puppetDBUrl.Scheme)
+		return fmt.Errorf("%s is not a valid http scheme", puppetDBUrl.Scheme)
 	}
 
 	var transport *http.Transport
@@ -108,6 +110,7 @@ func (cfg *PuppetDB) New() (err error) {
 	return
 }
 
+// Start starts the PuppetDB service discovery
 func (cfg *PuppetDB) Start() {
 	for {
 		log.WithFields(log.Fields{

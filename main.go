@@ -11,6 +11,7 @@ import (
 	"github.com/cryptobioz/prometheus-service-discovery/config"
 )
 
+// Backends stores backends configurations
 type Backends struct {
 	Backends struct {
 		PuppetDB puppetdb.PuppetDB `yaml:"puppetdb,omitempty"`

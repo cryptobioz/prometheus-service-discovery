@@ -4,6 +4,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// Config stores main configuration options
 type Config struct {
 	Output struct {
 		Type string `yaml:"type,omitempty"`
@@ -12,6 +13,7 @@ type Config struct {
 	LogLevel string `yaml:"log_level,omitempty"`
 }
 
+// LoadConfig read config file and unmarshal content into a struct
 func LoadConfig(y []byte) (conf Config, err error) {
 	err = yaml.Unmarshal(y, conf)
 	if err != nil {
