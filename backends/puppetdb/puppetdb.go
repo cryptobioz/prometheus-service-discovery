@@ -8,17 +8,19 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
+	//"os"
+	//"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"gopkg.in/yaml.v2"
+	//"gopkg.in/yaml.v2"
 )
 
 // PuppetDB is a struct which stores the PuppetDB configuration parameters
 type PuppetDB struct {
+	Name            string        `yaml:"name"`
 	URL             string        `yaml:"url"`
 	CertFile        string        `yaml:"certfile,omitempty"`
 	KeyFile         string        `yaml:"keyfile,omitempty"`
@@ -30,6 +32,16 @@ type PuppetDB struct {
 	Timeout         int           `yaml:"timeout,omitempty"`
 	RefreshInterval time.Duration `yaml:"refresh_interval,omitempty"`
 	client          *http.Client
+}
+
+type jobConfig struct {
+	JobName       string            `yaml:"job_name,omitempty"`
+	HonorLabels   bool              `yaml:"honor_labels,omitempty"`
+	MetricsPath   string            `yaml:"metrics_path,omitempty"`
+	Params        string            `yaml:"params,omitempty"`
+	StaticConfigs []staticConfig    `yaml:"static_configs,omitempty"`
+	Scheme        string            `yaml:"scheme,omitempty"`
+	BasicAuth     map[string]string `yaml:"basic_auth,omitempty"`
 }
 
 type node struct {
@@ -111,30 +123,23 @@ func (cfg *PuppetDB) New() (err error) {
 }
 
 // Start starts the PuppetDB service discovery
-func (cfg *PuppetDB) Start() {
+func (cfg *PuppetDB) Start(puppetDBData chan interface{}) {
+	var data interface{}
 	for {
 		log.WithFields(log.Fields{
 			"backend": "puppetdb",
-			"output":  cfg.Output,
 		}).Debugf("Sleeping for %ds", cfg.RefreshInterval)
 		time.Sleep(cfg.RefreshInterval * time.Second)
 
-		c, err := cfg.getTargets()
+		output, err := cfg.getTargets()
 		if err != nil {
 			log.Errorf("failed to get exporters: %s", err)
 			continue
 		}
 
-		switch cfg.Output {
-		case "stdout":
-			fmt.Printf("%v", string(c))
-		case "file":
-			os.MkdirAll(filepath.Dir(cfg.OutputFile), 0755)
-			err = ioutil.WriteFile(cfg.OutputFile, c, 0644)
-			if err != nil {
-				log.Errorf("failed to write output: %s", err)
-				continue
-			}
+		if !reflect.DeepEqual(output, data) {
+			data = output
+			puppetDBData <- data
 		}
 	}
 }
@@ -162,7 +167,7 @@ func (cfg *PuppetDB) getNodes() (nodes []node, err error) {
 	return
 }
 
-func (cfg *PuppetDB) getTargets() (c []byte, err error) {
+func (cfg *PuppetDB) getTargets() (interface{}, error) {
 	fileSdConfig := []staticConfig{}
 
 	nodes, err := cfg.getNodes()
@@ -203,6 +208,16 @@ func (cfg *PuppetDB) getTargets() (c []byte, err error) {
 		}
 	}
 
-	c, err = yaml.Marshal(&fileSdConfig)
-	return
+	job := []jobConfig{
+		jobConfig{
+			JobName:       cfg.Name,
+			HonorLabels:   true,
+			MetricsPath:   "/metrics",
+			StaticConfigs: fileSdConfig,
+			Scheme:        "http",
+		},
+	}
+
+	//c, err = yaml.Marshal(&fileSdConfig)
+	return job, nil
 }
