@@ -8,14 +8,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	//"os"
-	//"path/filepath"
 	"reflect"
 	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	//"gopkg.in/yaml.v2"
+
+	"github.com/cryptobioz/prometheus-service-discovery/backends"
 )
 
 // PuppetDB is a struct which stores the PuppetDB configuration parameters
@@ -34,16 +33,6 @@ type PuppetDB struct {
 	client          *http.Client
 }
 
-type jobConfig struct {
-	JobName       string            `yaml:"job_name,omitempty"`
-	HonorLabels   bool              `yaml:"honor_labels,omitempty"`
-	MetricsPath   string            `yaml:"metrics_path,omitempty"`
-	Params        string            `yaml:"params,omitempty"`
-	StaticConfigs []staticConfig    `yaml:"static_configs,omitempty"`
-	Scheme        string            `yaml:"scheme,omitempty"`
-	BasicAuth     map[string]string `yaml:"basic_auth,omitempty"`
-}
-
 type node struct {
 	Certname  string                `json:"certname"`
 	Exporters map[string][]exporter `json:"value"`
@@ -54,9 +43,14 @@ type exporter struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-type staticConfig struct {
-	Targets []string          `yaml:"targets"`
-	Labels  map[string]string `yaml:"labels"`
+// GetName returns the backend's name
+func (cfg *PuppetDB) GetName() string {
+	return "puppetdb"
+}
+
+// GetID returns the target's ID
+func (cfg *PuppetDB) GetID() string {
+	return cfg.Name
 }
 
 // New creates a new PuppetDB client
@@ -123,18 +117,23 @@ func (cfg *PuppetDB) New() (err error) {
 }
 
 // Start starts the PuppetDB service discovery
-func (cfg *PuppetDB) Start(puppetDBData chan interface{}) {
-	var data interface{}
+func (cfg *PuppetDB) Start(puppetDBData chan backends.BackendData) {
+	var data backends.BackendData
 	for {
 		log.WithFields(log.Fields{
 			"backend": "puppetdb",
 		}).Debugf("Sleeping for %ds", cfg.RefreshInterval)
 		time.Sleep(cfg.RefreshInterval * time.Second)
 
-		output, err := cfg.getTargets()
+		jobs, err := cfg.getTargets()
 		if err != nil {
 			log.Errorf("failed to get exporters: %s", err)
 			continue
+		}
+		output := backends.BackendData{
+			ID:      cfg.Name,
+			Backend: "puppetdb",
+			Jobs:    jobs.([]backends.JobConfig),
 		}
 
 		if !reflect.DeepEqual(output, data) {
@@ -168,7 +167,7 @@ func (cfg *PuppetDB) getNodes() (nodes []node, err error) {
 }
 
 func (cfg *PuppetDB) getTargets() (interface{}, error) {
-	fileSdConfig := []staticConfig{}
+	fileSdConfig := []backends.StaticConfig{}
 
 	nodes, err := cfg.getNodes()
 	if err != nil {
@@ -199,7 +198,7 @@ func (cfg *PuppetDB) getTargets() (interface{}, error) {
 					labels[k] = v
 				}
 
-				staticConfig := staticConfig{
+				staticConfig := backends.StaticConfig{
 					Targets: []string{u.Host},
 					Labels:  labels,
 				}
@@ -208,8 +207,8 @@ func (cfg *PuppetDB) getTargets() (interface{}, error) {
 		}
 	}
 
-	job := []jobConfig{
-		jobConfig{
+	job := []backends.JobConfig{
+		backends.JobConfig{
 			JobName:       cfg.Name,
 			HonorLabels:   true,
 			MetricsPath:   "/metrics",
@@ -217,7 +216,5 @@ func (cfg *PuppetDB) getTargets() (interface{}, error) {
 			Scheme:        "http",
 		},
 	}
-
-	//c, err = yaml.Marshal(&fileSdConfig)
 	return job, nil
 }

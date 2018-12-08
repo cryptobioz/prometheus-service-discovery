@@ -1,7 +1,7 @@
 package main
 
 import (
-	//"fmt"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -11,17 +11,16 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 
+	"github.com/cryptobioz/prometheus-service-discovery/backends"
 	"github.com/cryptobioz/prometheus-service-discovery/backends/cattle"
 	"github.com/cryptobioz/prometheus-service-discovery/backends/puppetdb"
+	"github.com/cryptobioz/prometheus-service-discovery/backends/static"
 	"github.com/cryptobioz/prometheus-service-discovery/config"
 )
 
 // Backends stores backends configurations
 type Backends struct {
-	Backends struct {
-		PuppetDB []puppetdb.PuppetDB `yaml:"puppetdb,omitempty"`
-		Cattle   []cattle.Cattle     `yaml:"cattle,omitempty"`
-	} `yaml:"backends,omitempty"`
+	Backends map[string][]interface{} `yaml:"backends,omitempty"`
 }
 
 func main() {
@@ -48,74 +47,59 @@ func main() {
 		return
 	}
 
+	chanData := make(chan backends.BackendData)
+	var back backends.BackendInterface
+
+	// TODO: optimize
+	for k, v := range b.Backends {
+		for _, target := range v {
+			switch k {
+			case "puppetdb":
+				c := &puppetdb.PuppetDB{}
+				rawTarget, _ := yaml.Marshal(target)
+				err = yaml.Unmarshal(rawTarget, &c)
+				back = c
+			case "cattle":
+				c := &cattle.Cattle{}
+				rawTarget, _ := yaml.Marshal(target)
+				err = yaml.Unmarshal(rawTarget, &c)
+				back = c
+			case "static":
+				c := &static.Static{}
+				rawTarget, _ := yaml.Marshal(target)
+				err = yaml.Unmarshal(rawTarget, &c)
+				back = c
+			}
+
+			log.WithFields(log.Fields{
+				"backend": back.GetName(),
+				"id":      back.GetID(),
+			}).Info("Initializing backend...")
+			err = back.New()
+			if err != nil {
+				log.WithFields(log.Fields{
+					"backend": back.GetName(),
+					"id":      back.GetID(),
+				}).Errorf("failed to initialize backend: %s", err)
+			}
+
+			go back.Start(chanData)
+		}
+	}
+
 	e := make(map[string][]byte)
-
-	puppetDBData := make(chan interface{})
-	cattleData := make(chan interface{})
-
-	if len(b.Backends.PuppetDB) > 0 {
-		for _, p := range b.Backends.PuppetDB {
-			log.WithFields(log.Fields{
-				"backend": "puppetdb",
-				"name":    p.Name,
-			}).Info("Initializing...")
-
-			err = p.New()
-			if err != nil {
-				log.Errorf("failed to initialize PuppetBD: %s", err)
-				break
-			}
-
-			log.WithFields(log.Fields{
-				"backend": "puppetdb",
-				"name":    p.Name,
-			}).Info("Starting...")
-
-			go p.Start(puppetDBData)
-		}
-	}
-
-	if len(b.Backends.Cattle) > 0 {
-		for _, c := range b.Backends.Cattle {
-			log.WithFields(log.Fields{
-				"backend": "cattle",
-				"name":    c.Name,
-			}).Info("Initializing...")
-
-			err = c.New()
-			if err != nil {
-				log.Errorf("failed to initialize Cattle: %s", err)
-				continue
-			}
-
-			log.WithFields(log.Fields{
-				"backend": "cattle",
-				"name":    c.Name,
-			}).Info("Starting...")
-
-			go c.Start(cattleData)
-		}
-	}
-
-	var d interface{}
+	var d backends.BackendData
 	for {
 		select {
-		case d = <-puppetDBData:
-			e["puppetdb"], err = yaml.Marshal(&d)
+		case d = <-chanData:
+			i := d
+			e[fmt.Sprintf("%s_%s", i.Backend, i.ID)], err = yaml.Marshal(&d.Jobs)
 			if err != nil {
-				log.Errorf("failed to export PuppetDB targets: %s", err)
+				log.WithFields(log.Fields{
+					"backend": i.Backend,
+					"id":      i.ID,
+				}).Errorf("failed to export targets: %s", err)
 			}
-			log.WithFields(log.Fields{
-				"backend": "puppetdb",
-			}).Debugf("Exporters list refreshed")
-		case d = <-cattleData:
-			e["cattle"], err = yaml.Marshal(&d)
-			if err != nil {
-				log.Errorf("failed to export Cattle targets: %s", err)
-			}
-			log.WithFields(log.Fields{
-				"backend": "cattle",
-			}).Debugf("Exporters list refreshed")
 		}
 		err = writeConfig(cfg, e)
 		if err != nil {

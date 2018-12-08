@@ -2,13 +2,13 @@ package cattle
 
 import (
 	"fmt"
-	//"os"
-	//"path/filepath"
 	"reflect"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/rancher/go-rancher/v2"
+
+	"github.com/cryptobioz/prometheus-service-discovery/backends"
 )
 
 // Cattle is a struct which stores the Cattle configuration parameters
@@ -22,21 +22,6 @@ type Cattle struct {
 	client          *client.RancherClient
 }
 
-type jobConfig struct {
-	JobName       string            `yaml:"job_name,omitempty"`
-	HonorLabels   bool              `yaml:"honor_labels,omitempty"`
-	MetricsPath   string            `yaml:"metrics_path,omitempty"`
-	Params        string            `yaml:"params,omitempty"`
-	StaticConfigs []staticConfig    `yaml:"static_configs,omitempty"`
-	Scheme        string            `yaml:"scheme,omitempty"`
-	BasicAuth     map[string]string `yaml:"basic_auth,omitempty"`
-}
-
-type staticConfig struct {
-	Targets []string          `yaml:"targets,omitempty"`
-	Labels  map[string]string `yaml:"labels,omitempty"`
-}
-
 type prometheusServer struct {
 	name     string
 	host     string
@@ -44,6 +29,16 @@ type prometheusServer struct {
 	username string
 	password string
 	scheme   string
+}
+
+// GetName returns the backend's name
+func (cfg *Cattle) GetName() string {
+	return "cattle"
+}
+
+// GetID returns the target's ID
+func (cfg *Cattle) GetID() string {
+	return cfg.Name
 }
 
 // New creates a new Cattle client
@@ -66,11 +61,12 @@ func (cfg *Cattle) New() (err error) {
 }
 
 // Start starts the Cattle service discovery
-func (cfg *Cattle) Start(cattleData chan interface{}) {
-	var data interface{}
+func (cfg *Cattle) Start(cattleData chan backends.BackendData) {
+	var data backends.BackendData
 	for {
 		log.WithFields(log.Fields{
 			"backend": "cattle",
+			"id":      cfg.Name,
 		}).Debugf("Sleeping for %ds", cfg.RefreshInterval)
 		time.Sleep(cfg.RefreshInterval * time.Second)
 
@@ -169,17 +165,17 @@ func (cfg *Cattle) getTargets() (targets []prometheusServer, err error) {
 	return
 }
 
-func (cfg *Cattle) formatTargets(targets []prometheusServer) (interface{}, error) {
-	jobs := []jobConfig{}
+func (cfg *Cattle) formatTargets(targets []prometheusServer) (backends.BackendData, error) {
+	jobs := []backends.JobConfig{}
 
 	for _, target := range targets {
-		job := jobConfig{
+		job := backends.JobConfig{
 			JobName:     target.name,
 			HonorLabels: true,
 			MetricsPath: "/federate",
 			Scheme:      target.scheme,
-			StaticConfigs: []staticConfig{
-				staticConfig{
+			StaticConfigs: []backends.StaticConfig{
+				backends.StaticConfig{
 					Targets: []string{
 						fmt.Sprintf("%s:%s", target.host, target.port),
 					},
@@ -199,5 +195,10 @@ func (cfg *Cattle) formatTargets(targets []prometheusServer) (interface{}, error
 		}
 		jobs = append(jobs, job)
 	}
-	return jobs, nil
+	data := backends.BackendData{
+		ID:      cfg.Name,
+		Backend: "cattle",
+		Jobs:    jobs,
+	}
+	return data, nil
 }
